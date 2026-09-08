@@ -256,14 +256,45 @@ def build_features(df: pd.DataFrame, accounts: list) -> np.ndarray:
     return features
 
 
-def standardise(features: np.ndarray) -> np.ndarray:
+def fit_scaler(features: np.ndarray) -> dict:
+    """
+    Per-column mean and standard deviation, as plain lists so the scaler can
+    be saved to JSON and reused at serving time.
+    """
 
     mean = features.mean(axis=0)
     std = features.std(axis=0)
 
     std[std < 1e-8] = 1.0
 
+    return {
+        "mean": [float(value) for value in mean],
+        "std": [float(value) for value in std],
+    }
+
+
+def apply_scaler(features: np.ndarray, scaler: dict) -> np.ndarray:
+    """
+    Standardise with *given* statistics.
+
+    Serving must reuse the statistics fitted during training. Re-fitting on
+    whatever traffic happens to be in memory would put the features on a
+    different scale from the ones the model was trained on, and the scores
+    would be meaningless.
+    """
+
+    mean = np.asarray(scaler["mean"], dtype=np.float32)
+    std = np.asarray(scaler["std"], dtype=np.float32)
+
     return ((features - mean) / std).astype(np.float32)
+
+
+def standardise(features: np.ndarray) -> np.ndarray:
+    """
+    Fit and apply in one step. Used when building the training graph.
+    """
+
+    return apply_scaler(features, fit_scaler(features))
 
 
 # ============================================================

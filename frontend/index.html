@@ -35,6 +35,11 @@
         <svg viewBox="0 0 24 24" class="ico"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6V11h-6v9Zm0-16v5h6V4h-6Z"/></svg>
         <span>Overview</span>
       </button>
+      <button class="nav-item" data-view="live">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 3.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>
+        <span>Live stream</span>
+        <em class="nav-badge nav-badge-live" id="navLive">·</em>
+      </button>
       <button class="nav-item" data-view="rings">
         <svg viewBox="0 0 24 24" class="ico"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14Zm0 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
         <span>Fraud rings</span>
@@ -119,6 +124,76 @@
           <div id="typologies" class="bars bars-wide"></div>
         </article>
 
+      </section>
+
+      <!-- ---------- LIVE STREAM ---------- -->
+      <section class="view" data-view="live">
+
+        <div class="live-bar">
+          <div class="live-state" id="liveState">
+            <span class="live-dot"></span>
+            <span id="liveStateText">idle</span>
+          </div>
+          <label class="live-toggle">
+            <input type="checkbox" id="livePoll" checked>
+            <span>Auto-refresh</span>
+          </label>
+          <button class="btn btn-ghost" id="liveRescore">Force rescore</button>
+          <button class="btn btn-ghost" id="liveReset">Reset stream</button>
+          <span class="muted" id="liveHint">
+            Feed it with: <code>python -m streaming.replay --reset</code>
+          </span>
+        </div>
+
+        <div class="kpi-grid" id="liveKpis"></div>
+
+        <div class="grid-2">
+          <article class="card">
+            <div class="card-head">
+              <h2>Ingest rate</h2>
+              <span class="muted" id="liveRateNote"></span>
+            </div>
+            <div id="liveSpark"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <h2>Highest-risk accounts, live</h2>
+              <span class="muted" id="liveTopNote"></span>
+            </div>
+            <div id="liveTop" class="bars"></div>
+          </article>
+        </div>
+
+        <div class="grid-2">
+          <article class="card">
+            <div class="card-head">
+              <h2>Alert feed</h2>
+              <span class="muted" id="liveAlertCount"></span>
+            </div>
+            <div id="liveAlerts" class="alert-feed"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-head">
+              <h2>Rings in the live window</h2>
+              <span class="muted" id="liveRingNote"></span>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="liveRingTable">
+                <thead>
+                  <tr>
+                    <th>Ring</th>
+                    <th class="num">Size</th>
+                    <th class="num">Span</th>
+                    <th class="num">Risk</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
       </section>
 
       <!-- ---------- RINGS ---------- -->

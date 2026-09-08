@@ -24,6 +24,7 @@ const state = {
 
 const VIEW_META = {
   overview: ["Overview", "Detection posture across the synthetic event stream"],
+  live:     ["Live stream", "Events scored as they arrive, with rings forming in a sliding window"],
   rings:    ["Fraud rings", "Groups of accounts moving money together inside a short window"],
   accounts: ["Accounts", "Per-account fraud probability from the temporal GNN"],
   scoring:  ["Live scoring", "Score a transaction against the deployed model"],
@@ -129,6 +130,14 @@ function showView(name) {
 
   if (location.hash.slice(1) !== name) {
     history.replaceState(null, "", "#" + name);
+  }
+
+  // Polling runs only while the Live view is on screen.
+  if (name === "live") {
+    if ($("#livePoll").checked) startLivePolling();
+    else pollLive();
+  } else {
+    stopLivePolling();
   }
 }
 
@@ -952,6 +961,236 @@ function renderMetrics(data) {
 }
 
 // ==========================================================
+// LIVE STREAM
+// ==========================================================
+
+const live = {
+  timer: null,
+  history: [],
+  lastIngested: null,
+  lastAlertKey: null,
+};
+
+function sparkline(points) {
+  const width = 520, height = 130, padLeft = 34, padBottom = 22, padTop = 10;
+  const plotWidth = width - padLeft - 10;
+  const plotHeight = height - padBottom - padTop;
+
+  const root = svgRoot(width, height);
+
+  if (points.length < 2) {
+    const note = svgEl("text", {
+      x: width / 2, y: height / 2, "text-anchor": "middle",
+    });
+    note.setAttribute("class", "axis-text");
+    note.textContent = "waiting for events…";
+    root.appendChild(note);
+    return root;
+  }
+
+  const max = Math.max(1, ...points);
+
+  for (let step = 0; step <= 3; step++) {
+    const y = padTop + plotHeight - (plotHeight * step) / 3;
+    root.appendChild(svgEl("line", {
+      x1: padLeft, x2: width - 10, y1: y, y2: y, class: "grid-line",
+    }));
+    const label = svgEl("text", { x: padLeft - 7, y: y + 3, "text-anchor": "end" });
+    label.setAttribute("class", "axis-text");
+    label.textContent = Math.round((max * step) / 3);
+    root.appendChild(label);
+  }
+
+  const stepX = plotWidth / (points.length - 1);
+
+  const coords = points.map((value, index) => [
+    padLeft + index * stepX,
+    padTop + plotHeight - (value / max) * plotHeight,
+  ]);
+
+  root.appendChild(svgEl("path", {
+    d:
+      `M${coords[0][0]} ${padTop + plotHeight} ` +
+      coords.map(([x, y]) => `L${x} ${y}`).join(" ") +
+      ` L${coords[coords.length - 1][0]} ${padTop + plotHeight} Z`,
+    fill: "var(--accent)",
+    "fill-opacity": ".12",
+  }));
+
+  root.appendChild(svgEl("path", {
+    d: "M" + coords.map(([x, y]) => `${x} ${y}`).join(" L"),
+    fill: "none",
+    stroke: "var(--accent)",
+    "stroke-width": 2,
+    "stroke-linejoin": "round",
+  }));
+
+  const [lastX, lastY] = coords[coords.length - 1];
+  root.appendChild(svgEl("circle", {
+    cx: lastX, cy: lastY, r: 3.5, fill: "var(--accent)",
+  }));
+
+  return root;
+}
+
+function renderLive(state) {
+
+  // status pill
+  const flowing =
+    live.lastIngested !== null && state.events_ingested > live.lastIngested;
+
+  live.lastIngested = state.events_ingested;
+
+  const stateBox = $("#liveState");
+  stateBox.classList.toggle("is-flowing", flowing);
+  $("#liveStateText").textContent = flowing
+    ? `receiving · ${state.throughput_per_second}/s`
+    : "idle";
+
+  $("#navLive").textContent = state.active_rings || "·";
+
+  if (!state.available) {
+    $("#liveKpis").innerHTML =
+      `<div class="kpi is-warn"><div class="kpi-label">Streaming</div>
+       <div class="kpi-value">off</div>
+       <div class="kpi-sub">${esc(state.error || "unavailable")}</div></div>`;
+    return;
+  }
+
+  const cards = [
+    {
+      label: "Events in stream",
+      value: fmtInt(state.events_total),
+      sub: `${fmtInt(state.events_ingested)} ingested live`,
+      tone: "",
+    },
+    {
+      label: "Accounts tracked",
+      value: fmtInt(state.accounts_known),
+      sub: `${fmtInt(state.flagged_accounts)} above threshold`,
+      tone: "",
+    },
+    {
+      label: "Live rings",
+      value: fmtInt(state.active_rings),
+      sub: `${state.window_minutes} minute window`,
+      tone: "is-danger",
+    },
+    {
+      label: "Rescore latency",
+      value:
+        state.last_rescore_ms === null ? "–" : `${state.last_rescore_ms} ms`,
+      sub: `${fmtInt(state.rescores)} rescores, every ${state.rescore_every} events`,
+      tone: "is-success",
+    },
+    {
+      label: "Throughput",
+      value: `${state.throughput_per_second}/s`,
+      sub: state.events_rejected
+        ? `${fmtInt(state.events_rejected)} rejected`
+        : "no rejected events",
+      tone: state.events_rejected ? "is-warn" : "",
+    },
+  ];
+
+  $("#liveKpis").innerHTML = cards.map(card => `
+    <div class="kpi ${card.tone}">
+      <div class="kpi-label">${esc(card.label)}</div>
+      <div class="kpi-value">${esc(card.value)}</div>
+      <div class="kpi-sub">${esc(card.sub)}</div>
+    </div>`).join("");
+
+  // ingest-rate sparkline
+  live.history.push(state.throughput_per_second || 0);
+  if (live.history.length > 60) live.history.shift();
+
+  const spark = $("#liveSpark");
+  spark.innerHTML = "";
+  spark.appendChild(sparkline(live.history));
+
+  $("#liveRateNote").textContent =
+    `${fmtInt(state.events_ingested)} events ingested this session`;
+
+  // top accounts
+  const top = state.top_accounts || [];
+
+  if (top.length) {
+    renderBars(
+      "#liveTop",
+      top.slice(0, 10).map(row => [row.account, row.score]),
+      true,
+    );
+    $$("#liveTop .bar-value").forEach((node, index) => {
+      node.textContent = fmtNum(top[index].score, 3);
+    });
+  }
+
+  $("#liveTopNote").textContent = `threshold ${state.threshold}`;
+
+  // alerts
+  const alerts = state.alerts || [];
+
+  $("#liveAlertCount").textContent = `${fmtInt(alerts.length)} recent`;
+
+  $("#liveAlerts").innerHTML = alerts.length
+    ? alerts.map(alert => `
+        <div class="alert">
+          <span class="alert-kind is-${esc(alert.kind)}">
+            ${alert.kind === "ring" ? "◎" : "!"}
+          </span>
+          <span class="alert-body">${esc(alert.message)}</span>
+          <span class="alert-time">${new Date(alert.at * 1000)
+            .toLocaleTimeString()}</span>
+        </div>`).join("")
+    : `<div class="empty"><p>No alerts yet. Replay the stream to generate some.</p></div>`;
+}
+
+function renderLiveRings(rings) {
+
+  $("#liveRingNote").textContent = `${fmtInt(rings.length)} active`;
+
+  $("#liveRingTable tbody").innerHTML = rings.length
+    ? rings.map(ring => `
+        <tr>
+          <td><span class="acct">${esc(ring.detected_ring_id)}</span></td>
+          <td class="num">${fmtInt(ring.ring_size)}</td>
+          <td class="num">${fmtNum(ring.time_span_minutes, 1)}m</td>
+          <td class="num">${fmtNum(ring.ring_risk_score, 3)}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="4" class="muted" style="padding:20px">
+         No rings in the current window.</td></tr>`;
+}
+
+async function pollLive() {
+  try {
+    const [state, rings] = await Promise.all([
+      api("/api/stream/state"),
+      api("/api/stream/rings").catch(() => ({ rings: [] })),
+    ]);
+
+    renderLive(state);
+    renderLiveRings(rings.rings || []);
+
+  } catch (error) {
+    $("#liveStateText").textContent = "disconnected";
+    $("#liveState").classList.remove("is-flowing");
+  }
+}
+
+function startLivePolling() {
+  stopLivePolling();
+  pollLive();
+  live.timer = setInterval(pollLive, 2000);
+}
+
+function stopLivePolling() {
+  if (live.timer) {
+    clearInterval(live.timer);
+    live.timer = null;
+  }
+}
+
+// ==========================================================
 // BOOT
 // ==========================================================
 
@@ -1046,6 +1285,35 @@ function init() {
     event.preventDefault();
     const value = $("#lookupInput").value.trim();
     if (value) lookupAccount(value);
+  });
+
+  // live stream
+  $("#livePoll").addEventListener("change", event => {
+    if (event.target.checked) startLivePolling();
+    else stopLivePolling();
+  });
+
+  $("#liveRescore").addEventListener("click", async () => {
+    try {
+      const result = await fetch("/api/stream/rescore", { method: "POST" })
+        .then(response => response.json());
+      toast(`Rescored ${fmtInt(result.accounts)} accounts in ${result.milliseconds} ms`);
+      pollLive();
+    } catch (error) {
+      toast("Rescore failed: " + error.message);
+    }
+  });
+
+  $("#liveReset").addEventListener("click", async () => {
+    try {
+      await fetch("/api/stream/reset", { method: "POST" });
+      live.history = [];
+      live.lastIngested = null;
+      toast("Live stream reset to the seeded baseline");
+      pollLive();
+    } catch (error) {
+      toast("Reset failed: " + error.message);
+    }
   });
 
   // scoring

@@ -25,11 +25,18 @@ Account features are the same leak-free behavioural features used by the
 homogeneous baseline - see graph/prepare_graph.py. No column derived from
 `is_fraud`, `ring_id` or `typology` is ever used as an input feature.
 
-Output:
+`build_hetero_graph` is the single construction path, shared by this script
+and by the live streaming detector, so an account is described identically
+whether it is scored in a batch run or on arrival.
+
+Outputs:
     data/processed/hetero_graph_data.pt
+    data/processed/feature_scaler.json
 """
 
 from pathlib import Path
+
+import json
 
 import numpy as np
 import pandas as pd
@@ -37,32 +44,59 @@ import torch
 from torch_geometric.data import HeteroData
 
 from graph.prepare_graph import (
+    apply_scaler,
     build_account_index,
     build_features,
     build_labels,
     build_masks,
+    fit_scaler,
     load_events,
-    standardise,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 OUTPUT_FILE = ROOT / "data" / "processed" / "hetero_graph_data.pt"
+SCALER_FILE = ROOT / "data" / "processed" / "feature_scaler.json"
+
+ENTITY_TYPES = ("device", "vpa", "merchant")
+
+# Key under which the training time scale is stored in the scaler file.
+TIME_SPAN_KEY = "__time_span_seconds__"
 
 
 # ============================================================
 # TIME NORMALISATION
 # ============================================================
 
-def normalised_time(df: pd.DataFrame) -> pd.Series:
+def normalised_time(df: pd.DataFrame, span_seconds: float = None):
     """
-    Map timestamps to [0, 1] across the dataset span.
-    0 = first event in the dataset, 1 = most recent event.
+    Scale timestamps into time units the model was trained on.
+
+    Returns (series, span_seconds_used).
+
+    `span_seconds` fixes the scale. Training passes None, which measures the
+    span of the training data and returns it so it can be stored. Serving
+    passes the stored value.
+
+    This matters for streaming. If the scale were re-derived from whatever is
+    in the buffer, every newly ingested event would stretch the span and
+    retroactively rescale the time on every historical edge - so old accounts
+    would change score merely because unrelated new traffic arrived. Fixing
+    the scale keeps history stable and lets new events simply extend it.
     """
 
-    seconds = (
-        df["timestamp"].astype("int64") / 1_000_000_000.0
+    # Convert to seconds explicitly. `astype("int64")` returns whatever
+    # resolution pandas happens to be storing (nanoseconds on some versions,
+    # microseconds on others), so dividing by a hard-coded 1e9 gives a value
+    # whose unit depends on the pandas build - which would make a stored time
+    # span meaningless across environments.
+    seconds = pd.Series(
+        df["timestamp"]
+        .to_numpy(dtype="datetime64[s]")
+        .astype("int64")
+        .astype(float),
+        index=df.index,
     )
 
     seconds = seconds.replace(
@@ -71,18 +105,23 @@ def normalised_time(df: pd.DataFrame) -> pd.Series:
     )
 
     start = seconds.min()
-    end = seconds.max()
 
-    span = end - start
+    span = span_seconds
 
-    if not np.isfinite(span) or span <= 0:
-        return pd.Series(
-            np.zeros(len(df)),
-            index=df.index,
-            dtype=float,
+    if span is None:
+        span = seconds.max() - start
+
+    if span is None or not np.isfinite(span) or span <= 0:
+        return (
+            pd.Series(
+                np.zeros(len(df)),
+                index=df.index,
+                dtype=float,
+            ),
+            None,
         )
 
-    return ((seconds - start) / span).fillna(0.0)
+    return ((seconds - start) / span).fillna(0.0), float(span)
 
 
 # ============================================================
@@ -109,9 +148,9 @@ def entity_features(
     column: str,
     index_map: dict,
     time: pd.Series,
-) -> torch.Tensor:
+) -> np.ndarray:
     """
-    Generic activity profile for a non-account node type:
+    Raw (unscaled) activity profile for a non-account node type:
 
         [ log(event count),
           log(distinct accounts),
@@ -120,7 +159,7 @@ def entity_features(
     """
 
     if not index_map:
-        return torch.zeros((0, 4), dtype=torch.float)
+        return np.zeros((0, 4), dtype=np.float32)
 
     keys = pd.Index(list(index_map.keys()))
 
@@ -155,15 +194,28 @@ def entity_features(
         ]
     ).astype(np.float32)
 
-    features = np.nan_to_num(
+    return np.nan_to_num(
         features,
         nan=0.0,
         posinf=0.0,
         neginf=0.0,
     )
 
+
+def scale(features: np.ndarray, node_type: str, scalers: dict) -> torch.Tensor:
+    """
+    Apply the stored scaler for a node type, fitting it first if this is the
+    training run (scalers is being built rather than reused).
+    """
+
+    if features.shape[0] == 0:
+        return torch.zeros(features.shape, dtype=torch.float)
+
+    if node_type not in scalers:
+        scalers[node_type] = fit_scaler(features)
+
     return torch.tensor(
-        standardise(features),
+        apply_scaler(features, scalers[node_type]),
         dtype=torch.float,
     )
 
@@ -221,20 +273,39 @@ def attach(data: HeteroData, relation: tuple, edge_index, edge_time) -> None:
 
 
 # ============================================================
-# MAIN
+# CONSTRUCTION (shared by the batch script and live scoring)
 # ============================================================
 
-def prepare_hetero_graph() -> HeteroData:
+def build_hetero_graph(
+    df: pd.DataFrame,
+    scalers: dict = None,
+    with_labels: bool = True,
+):
+    """
+    Build the heterogeneous graph from an event frame.
 
-    print("=" * 60)
-    print("HETEROGENEOUS GRAPH PREPARATION")
-    print("=" * 60)
+    Args:
+        df: events, with `timestamp` already parsed to datetime.
+        scalers: feature statistics per node type. Pass the stored training
+            scalers when serving; pass None (or an empty dict) to fit them,
+            which is what the training run does.
+        with_labels: attach `y` and the train/val/test masks. Live traffic
+            has no labels, so the streaming path sets this False.
 
-    df = load_events()
+    Returns:
+        (data, scalers, accounts)
+    """
 
-    print(f"Events loaded: {len(df):,}")
+    if scalers is None:
+        scalers = {}
 
-    time = normalised_time(df)
+    time, span = normalised_time(
+        df,
+        scalers.get(TIME_SPAN_KEY),
+    )
+
+    if TIME_SPAN_KEY not in scalers and span is not None:
+        scalers[TIME_SPAN_KEY] = span
 
     event_type = df["event_type"].astype(str).str.upper()
 
@@ -263,37 +334,46 @@ def prepare_hetero_graph() -> HeteroData:
         else pd.Series(dtype=str)
     )
 
-    print(
-        f"Nodes - account: {len(account_map)}, "
-        f"device: {len(device_map)}, "
-        f"vpa: {len(vpa_map)}, "
-        f"merchant: {len(merchant_map)}"
-    )
-
     data = HeteroData()
 
     # --------------------------------------------------------
     # Node features
     # --------------------------------------------------------
 
-    data["account"].x = torch.tensor(
-        standardise(build_features(df, accounts)),
-        dtype=torch.float,
+    data["account"].x = scale(
+        build_features(df, accounts),
+        "account",
+        scalers,
     )
 
-    if device_map:
-        data["device"].x = entity_features(
-            df, "device_id", device_map, time
-        )
+    entity_columns = {
+        "device": "device_id",
+        "vpa": "source_vpa",
+        "merchant": "merchant_id",
+    }
 
-    if vpa_map:
-        data["vpa"].x = entity_features(
-            df, "source_vpa", vpa_map, time
-        )
+    entity_maps = {
+        "device": device_map,
+        "vpa": vpa_map,
+        "merchant": merchant_map,
+    }
 
-    if merchant_map:
-        data["merchant"].x = entity_features(
-            df, "merchant_id", merchant_map, time
+    for node_type in ENTITY_TYPES:
+
+        index_map = entity_maps[node_type]
+
+        if not index_map:
+            continue
+
+        data[node_type].x = scale(
+            entity_features(
+                df,
+                entity_columns[node_type],
+                index_map,
+                time,
+            ),
+            node_type,
+            scalers,
         )
 
     # --------------------------------------------------------
@@ -342,74 +422,37 @@ def prepare_hetero_graph() -> HeteroData:
         ),
     )
 
-    if device_map:
-
-        edge_index, edge_time = build_edge(
-            df,
-            "source_account",
-            "device_id",
-            account_map,
-            device_map,
-            time,
-        )
-
-        attach(
-            data,
-            ("account", "logs_in", "device"),
-            edge_index,
-            edge_time,
-        )
-
-        if edge_index is not None:
-            attach(
-                data,
-                ("device", "rev_logs_in", "account"),
-                edge_index.flip(0),
-                edge_time,
-            )
-
-    if vpa_map:
-
-        edge_index, edge_time = build_edge(
-            df,
-            "source_account",
-            "source_vpa",
-            account_map,
-            vpa_map,
-            time,
-        )
-
-        attach(
-            data,
-            ("account", "owns", "vpa"),
-            edge_index,
-            edge_time,
-        )
-
-        if edge_index is not None:
-            attach(
-                data,
-                ("vpa", "rev_owns", "account"),
-                edge_index.flip(0),
-                edge_time,
-            )
-
-    if merchant_map:
-
-        collections = df[event_type == "MERCHANT_COLLECTION"]
-
-        edge_index, edge_time = build_edge(
-            collections,
-            "source_account",
+    paired = [
+        ("device", "device_id", "logs_in", "rev_logs_in", df),
+        ("vpa", "source_vpa", "owns", "rev_owns", df),
+        (
+            "merchant",
             "merchant_id",
+            "collects_at",
+            "rev_collects_at",
+            df[event_type == "MERCHANT_COLLECTION"],
+        ),
+    ]
+
+    for node_type, column, forward, reverse, frame in paired:
+
+        index_map = entity_maps[node_type]
+
+        if not index_map:
+            continue
+
+        edge_index, edge_time = build_edge(
+            frame,
+            "source_account",
+            column,
             account_map,
-            merchant_map,
+            index_map,
             time,
         )
 
         attach(
             data,
-            ("account", "collects_at", "merchant"),
+            ("account", forward, node_type),
             edge_index,
             edge_time,
         )
@@ -417,7 +460,7 @@ def prepare_hetero_graph() -> HeteroData:
         if edge_index is not None:
             attach(
                 data,
-                ("merchant", "rev_collects_at", "account"),
+                (node_type, reverse, "account"),
                 edge_index.flip(0),
                 edge_time,
             )
@@ -426,24 +469,59 @@ def prepare_hetero_graph() -> HeteroData:
     # Labels and splits
     # --------------------------------------------------------
 
-    labels = build_labels(df, account_map)
+    if with_labels:
 
-    train_mask, val_mask, test_mask = build_masks(labels)
+        labels = build_labels(df, account_map)
 
-    data["account"].y = labels
-    data["account"].train_mask = train_mask
-    data["account"].val_mask = val_mask
-    data["account"].test_mask = test_mask
+        train_mask, val_mask, test_mask = build_masks(labels)
+
+        data["account"].y = labels
+        data["account"].train_mask = train_mask
+        data["account"].val_mask = val_mask
+        data["account"].test_mask = test_mask
 
     data.account_ids = accounts
 
-    # --------------------------------------------------------
-    # Save
-    # --------------------------------------------------------
+    return data, scalers, accounts
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def prepare_hetero_graph() -> HeteroData:
+
+    print("=" * 60)
+    print("HETEROGENEOUS GRAPH PREPARATION")
+    print("=" * 60)
+
+    df = load_events()
+
+    print(f"Events loaded: {len(df):,}")
+
+    data, scalers, accounts = build_hetero_graph(df)
+
+    print(
+        f"Nodes - "
+        + ", ".join(
+            f"{node_type}: {data[node_type].x.shape[0]}"
+            for node_type in data.node_types
+        )
+    )
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     torch.save(data, OUTPUT_FILE)
+
+    # The scaler is what makes inductive serving possible: live features must
+    # be standardised with these statistics, not with statistics refitted on
+    # whatever traffic is in memory.
+    SCALER_FILE.write_text(
+        json.dumps(scalers, indent=2),
+        encoding="utf-8",
+    )
+
+    labels = data["account"].y
 
     print()
     print(data)
@@ -461,19 +539,13 @@ def prepare_hetero_graph() -> HeteroData:
 
     print(
         "Split (train/val/test): "
-        f"{int(train_mask.sum())} / "
-        f"{int(val_mask.sum())} / "
-        f"{int(test_mask.sum())}"
-    )
-
-    print(
-        "Fraud per split: "
-        f"{int(labels[train_mask].sum())} / "
-        f"{int(labels[val_mask].sum())} / "
-        f"{int(labels[test_mask].sum())}"
+        f"{int(data['account'].train_mask.sum())} / "
+        f"{int(data['account'].val_mask.sum())} / "
+        f"{int(data['account'].test_mask.sum())}"
     )
 
     print(f"Saved: {OUTPUT_FILE}")
+    print(f"Saved: {SCALER_FILE}")
     print("=" * 60)
 
     return data

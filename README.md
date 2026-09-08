@@ -24,6 +24,8 @@ end.
    pulling out connected components.
 5. **Serves** the scores through a FastAPI service, a web console at
    `/dashboard`, and a Streamlit page for quick analysis.
+6. **Detects live**: events streamed in over HTTP update the graph and
+   surface rings as they form, scoring accounts never seen in training.
 
 ---
 
@@ -108,6 +110,7 @@ data/synthetic/upi_events.csv          5,086 events, 500 accounts, 86 fraud even
                     +-- detection/gnn_ring_detector.py -> rings + account scores
                     +-- backend/main.py                -> FastAPI serving
                     |        +-- backend/dashboard_api.py -> /api/* for the console
+                    |        +-- backend/stream_service.py-> live detection
                     |        +-- frontend/               -> web console at /dashboard
                     +-- dashboard/app.py               -> Streamlit page
 ```
@@ -199,6 +202,76 @@ running a file with the plain ▶ button fails with
 `PYTHONPATH` to the project root to prevent that; from a terminal, always use
 `python -m graph.prepare_hetero_graph` rather than
 `python graph/prepare_hetero_graph.py`.
+
+---
+
+## Live streaming detection
+
+The batch pipeline scores a frozen graph. The streaming detector keeps it
+alive: events arrive over HTTP, the graph is rebuilt, accounts are rescored,
+and rings are extracted from a sliding window — no retraining, and accounts
+the model has never seen are scored on arrival.
+
+Start the API, then replay the event stream into it:
+
+```bash
+python -m streaming.replay --reset --tail 300 --speed 5000
+```
+
+Watch it at `http://127.0.0.1:8000/dashboard#live`. A representative run:
+
+```
+Warming detector with 4,786 historical events...
+Baseline: 500 accounts in 152.9 ms
+  [  240/300] rings 0 -> 2  (+2)
+  [  270/300] rings 2 -> 7  (+5)
+  [  300/300] rings 7 -> 12 (+5)
+
+Accounts known   : 500
+Flagged accounts : 72
+Active rings     : 12
+Last rescore     : 355.2 ms
+```
+
+Rings form as the fraud burst arrives, and the stream converges on exactly
+the same 12 rings and 72 flagged accounts the batch pipeline finds — the two
+paths share one graph-construction function, so they cannot drift apart.
+
+### Why no retraining is needed
+
+`TemporalHeteroGNN` has no node-ID embedding tables: every node type is a
+`nn.Linear` over its **features**, followed by neighbour aggregation. The
+architecture is inductive, so a brand-new account is scoreable the moment it
+has features and edges. Two things make that work in practice:
+
+- **The feature scaler is persisted.** `data/processed/feature_scaler.json`
+  stores the training mean and standard deviation per node type. Live
+  features are standardised with those, never with statistics refitted on
+  live traffic — refitting would put the inputs on a different scale from
+  the ones the model was trained on.
+- **The time scale is fixed.** The same file stores the training time span.
+  Without it, every arriving event would stretch the min/max span and
+  retroactively rescale the time on every historical edge, moving unrelated
+  accounts' scores. (This one was a real bug: ingesting ten events collapsed
+  ring detection from 12 rings to 2.)
+
+Existing scores do still move when the clock genuinely advances — that is the
+temporal gate decaying old evidence, which is the point of the model.
+
+### Streaming endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/stream/events` | Ingest a batch of events |
+| POST | `/api/stream/event` | Ingest one event |
+| GET | `/api/stream/state` | Counters, alerts, top accounts |
+| GET | `/api/stream/rings` | Rings in the live window |
+| POST | `/api/stream/rescore` | Force a rescore |
+| POST | `/api/stream/reset` | Return to the seeded baseline |
+
+Rescoring is batched (every 25 events by default) — a forward pass per event
+would dominate the cost without changing the answer. Events with an
+unparseable timestamp are rejected and reported rather than dropped.
 
 ---
 
@@ -294,8 +367,9 @@ reports `rule_layer_model_unavailable`.
 ## Layout
 
 ```
-backend/          FastAPI service, model serving layer, console API
+backend/          FastAPI service, model serving, console API, streaming
 frontend/         Web console (index.html, styles.css, app.js)
+streaming/        Event replay driver for live detection
 dashboard/        Streamlit page
 data/synthetic/   Generated event stream
 data/processed/   Graphs, labels, risk scores, detected rings
@@ -305,7 +379,7 @@ models/           Model definitions
 models/artifacts/ Trained checkpoints and measured metrics
 simulator/        Synthetic UPI event generator
 training/         Training and evaluation scripts
-tests/            61 tests
+tests/            72 tests
 ```
 
 ### Superseded files
@@ -365,12 +439,15 @@ sequence.
   it is drawing. Real UPI fraud is messier and the labels are noisier.
 - **Small evaluation set.** 500 accounts, 69 fraudulent, 75 in the test split.
   Confidence intervals on every metric above are wide.
-- **Transductive.** The model scores accounts present in the graph at build
-  time. A genuinely new account gets the rule-layer fallback, not a GNN score.
-  Inductive scoring for unseen accounts is the natural next step.
+- **`POST /score` is a lookup.** That endpoint answers from a table
+  precomputed at startup, so an account missing from it falls back to the
+  rule layer. The streaming path does score unseen accounts; the two are not
+  yet wired together.
 - **Ring metrics are in-sample**, as flagged above.
-- **No streaming.** "Real-time" here means low-latency scoring against a
-  precomputed graph, not incremental graph updates as events arrive.
+- **Rescoring is whole-graph.** Live detection rebuilds the graph and runs a
+  full forward pass. At this size that is ~200-350 ms, which is genuinely
+  real-time; a national payment network would need a graph store with
+  neighbour sampling instead.
 
 ---
 

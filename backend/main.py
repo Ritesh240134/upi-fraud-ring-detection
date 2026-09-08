@@ -12,6 +12,8 @@ from pydantic import BaseModel
 
 from backend.dashboard_api import router as dashboard_router
 from backend.model_service import model_service
+from backend.stream_api import router as stream_router
+from backend.stream_service import streaming_detector
 
 
 # ============================================================
@@ -59,6 +61,18 @@ async def lifespan(_: FastAPI):
         print(f"Model:              UNAVAILABLE ({model_service.error})")
         print("                    /score will use the rule layer only.")
 
+    # Warm the live detector so the console's Live view works immediately.
+    streaming_detector.load()
+
+    if streaming_detector.available:
+        print(
+            f"Streaming:          ready "
+            f"({streaming_detector.seeded_count} events seeded, "
+            f"{len(streaming_detector.rings)} rings)"
+        )
+    else:
+        print(f"Streaming:          UNAVAILABLE ({streaming_detector.error})")
+
     print("=" * 60)
     print("API startup complete")
     print("=" * 60)
@@ -74,6 +88,7 @@ app = FastAPI(
 )
 
 app.include_router(dashboard_router)
+app.include_router(stream_router)
 
 
 # ============================================================
@@ -226,6 +241,7 @@ def root():
             "score": "/score",
             "account_risk": "/accounts/{account_id}/risk",
             "model_info": "/model/info",
+            "stream": "/api/stream/state",
             "dashboard": "/dashboard",
             "docs": "/docs",
         },
