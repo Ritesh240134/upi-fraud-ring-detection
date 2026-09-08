@@ -1,0 +1,43 @@
+﻿Build the next phase of my existing project "upi-fraud-ring-detection".
+Goal: implement the first working Graph Neural Network model for UPI fraud-ring detection, using the existing synthetic data already present in the project.
+Requirements:
+1. Inspect the existing project structure and existing CSV files before writing code.
+2. Do NOT delete or overwrite working API code in backend/main.py.
+3. Use PyTorch and PyTorch Geometric if they are already installed; otherwise update requirements.txt appropriately.
+4. Create a graph data preparation module under graph/ that:
+   - reads the existing synthetic UPI events
+   - creates account nodes
+   - creates transaction edges
+   - generates useful account-level features
+   - creates fraud labels from the existing is_fraud / ground_truth_ring_id information
+5. Create a GraphSAGE model under models/ using PyTorch Geometric.
+6. Use a 2-layer GraphSAGE architecture with hidden dimension 64.
+7. Create a training script under training/train_gnn.py.
+8. Train the model on the existing synthetic data.
+9. Use a reproducible random seed.
+10. Save the trained model to models/artifacts/gnn_model.pt.
+11. Save training metrics to models/artifacts/training_metrics.json.
+12. Create an evaluation script under training/evaluate_gnn.py that reports:
+    - accuracy
+    - precision
+    - recall
+    - F1
+    - ROC-AUC when calculable
+13. Create tests under tests/ to verify:
+    - graph construction works
+    - node features contain no NaN or infinite values
+    - labels are valid
+    - model forward pass works
+14. Keep the implementation CPU-compatible because the project target supports CPU serving.
+15. Do not fabricate performance numbers. Only report metrics actually obtained by running the code.
+16. Do not implement the final temporal heterogeneous GNN yet. This phase is the baseline GraphSAGE model only.
+17. Do not break the existing /health, /rings, /explanations, or /score endpoints.
+After implementation:
+- run the graph preparation
+- run the GNN training
+- run the evaluation
+- run the tests
+- show the exact commands used
+- show whether each step succeeded or failed
+- clearly report the actual evaluation metrics.
+Start by inspecting the existing files, then implement and run this phase.

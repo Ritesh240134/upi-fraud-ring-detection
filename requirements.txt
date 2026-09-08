@@ -1,0 +1,30 @@
+# Versions are the ones this project was actually built and tested against
+# (Python 3.11, CPU-only). Loosen them if you need to.
+
+# --- core numerics ---
+numpy==2.4.6
+pandas==3.0.5
+scikit-learn==1.9.0
+polars==1.44.1
+
+# --- graph / model ---
+torch==2.14.0
+torch-geometric==2.8.0.post1
+networkx==3.6.1
+xgboost==3.2.0
+
+# --- serving ---
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.5
+
+# --- dashboard ---
+streamlit==1.63.0
+pyvis==0.3.2
+matplotlib==3.11.1
+
+# --- tests ---
+# httpx2 is required by starlette's TestClient; without it tests/test_api.py
+# is skipped rather than failed.
+pytest==9.1.1
+httpx2==2.12.0

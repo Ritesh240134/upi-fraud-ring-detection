@@ -1,0 +1,17 @@
+{
+  "model": "GraphSAGE (homogeneous baseline)",
+  "seed": 42,
+  "epochs": 300,
+  "best_epoch": 6,
+  "best_validation_loss": 0.848552405834198,
+  "final_train_loss": 0.017600977793335915,
+  "validation_f1": 0.5882352941176471,
+  "decision_threshold": 0.77,
+  "nodes": 500,
+  "edges": 3320,
+  "features": 13,
+  "positive_labels": 69,
+  "train_nodes": 350,
+  "val_nodes": 75,
+  "test_nodes": 75
+}

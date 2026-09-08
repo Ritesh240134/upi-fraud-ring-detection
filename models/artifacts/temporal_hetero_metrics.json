@@ -1,0 +1,17 @@
+{
+  "model": "TemporalHeteroGNN",
+  "uses_edge_time": true,
+  "seed": 42,
+  "epochs_run": 189,
+  "best_epoch": 109,
+  "best_validation_roc_auc": 0.8430769230769231,
+  "validation_loss_at_best": 3.779711961746216,
+  "validation_f1": 0.5714285714285714,
+  "decision_threshold": 0.38,
+  "accounts": 500,
+  "fraud_accounts_total": 69,
+  "train_accounts": 350,
+  "val_accounts": 75,
+  "test_accounts": 75,
+  "parameters": 154483
+}

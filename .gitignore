@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Generated artifacts
+#
+# These are all reproducible from the commands in README.md. They are
+# committed anyway so the API and dashboard work on a fresh clone without
+# a training run first. Remove the leading '#' to stop tracking them.
+# data/processed/
+# models/artifacts/

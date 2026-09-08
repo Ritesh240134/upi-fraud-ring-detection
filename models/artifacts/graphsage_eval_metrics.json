@@ -1,0 +1,32 @@
+{
+  "model": "GraphSAGE (homogeneous baseline)",
+  "decision_threshold": 0.77,
+  "test_nodes": 75,
+  "test_fraud_accounts": 11,
+  "validation": {
+    "accuracy": 0.9066666666666666,
+    "precision": 0.7142857142857143,
+    "recall": 0.5,
+    "f1": 0.5882352941176471,
+    "roc_auc": 0.8400000000000001,
+    "confusion_matrix": {
+      "true_negative": 63,
+      "false_positive": 2,
+      "false_negative": 5,
+      "true_positive": 5
+    }
+  },
+  "test": {
+    "accuracy": 0.8533333333333334,
+    "precision": 0.5,
+    "recall": 0.36363636363636365,
+    "f1": 0.42105263157894735,
+    "roc_auc": 0.75,
+    "confusion_matrix": {
+      "true_negative": 60,
+      "false_positive": 4,
+      "false_negative": 7,
+      "true_positive": 4
+    }
+  }
+}

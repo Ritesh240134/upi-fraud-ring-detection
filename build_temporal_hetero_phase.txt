@@ -1,0 +1,35 @@
+﻿Build the next phase of my existing project "upi-fraud-ring-detection".
+Goal:
+Implement the first working temporal heterogeneous GNN layer while preserving the existing working API and GraphSAGE baseline.
+Requirements:
+1. Inspect the existing project before modifying files.
+2. Do NOT delete or break backend/main.py or the working /health, /rings, /explanations, and /score endpoints.
+3. Keep the existing synthetic UPI data and graph_data.pt.
+4. Implement heterogeneous graph preparation under graph/ using the existing event columns:
+   - account
+   - device
+   - VPA
+   - merchant
+   - timestamp
+   - event_type
+   - source/target relationships
+5. Add relation-specific edge types for the available event relationships.
+6. Add timestamp/time encoding so messages can use event recency.
+7. Implement a CPU-compatible temporal heterogeneous GNN under models/.
+8. Keep the model reasonably small and compatible with the current Python/PyTorch/PyG environment.
+9. Preserve the existing GraphSAGE baseline files.
+10. Create a training script under training/ for the temporal heterogeneous model.
+11. Create an evaluation script under training/.
+12. Add tests verifying:
+    - heterogeneous graph construction
+    - valid node features
+    - valid timestamps
+    - no NaN/inf values
+    - forward pass works
+13. Save the new model under models/artifacts/.
+14. Save actual training/evaluation metrics under models/artifacts/.
+15. Do not fabricate performance numbers.
+16. Do not implement the final explainer or production streaming system yet.
+17. After implementation, run the graph preparation, training, evaluation, and tests.
+18. Clearly report which commands succeeded or failed and show the actual metrics.
+Start by inspecting the existing project files, then implement this phase carefully.
