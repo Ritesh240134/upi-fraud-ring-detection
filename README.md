@@ -182,6 +182,24 @@ And the Streamlit page, which stays as a quick analyst view:
 streamlit run dashboard/app.py               # http://localhost:8501
 ```
 
+### In VS Code
+
+Open the project folder, accept the recommended Python extensions, and pick
+the interpreter at `.venv\Scripts\python.exe`
+(`Ctrl+Shift+P` → *Python: Select Interpreter*).
+
+- **Ctrl+Shift+B** runs the whole pipeline end to end.
+- **F5** → *API + web console* starts the server with the debugger attached.
+- The **Testing** panel runs the test suite.
+- Individual stages are under `Ctrl+Shift+P` → *Tasks: Run Task*.
+
+One gotcha worth knowing: these modules import each other as a package, so
+running a file with the plain ▶ button fails with
+`ModuleNotFoundError: No module named 'graph'`. `.vscode/settings.json` sets
+`PYTHONPATH` to the project root to prevent that; from a terminal, always use
+`python -m graph.prepare_hetero_graph` rather than
+`python graph/prepare_hetero_graph.py`.
+
 ---
 
 ## Web console
