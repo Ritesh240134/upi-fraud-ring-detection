@@ -22,7 +22,8 @@ end.
    probability of belonging to a fraud ring.
 4. **Extracts rings** by sliding a time window over high-risk transfers and
    pulling out connected components.
-5. **Serves** the scores through a FastAPI service and a Streamlit dashboard.
+5. **Serves** the scores through a FastAPI service, a web console at
+   `/dashboard`, and a Streamlit page for quick analysis.
 
 ---
 
@@ -106,7 +107,9 @@ data/synthetic/upi_events.csv          5,086 events, 500 accounts, 86 fraud even
                     |
                     +-- detection/gnn_ring_detector.py -> rings + account scores
                     +-- backend/main.py                -> FastAPI serving
-                    +-- dashboard/app.py               -> Streamlit dashboard
+                    |        +-- backend/dashboard_api.py -> /api/* for the console
+                    |        +-- frontend/               -> web console at /dashboard
+                    +-- dashboard/app.py               -> Streamlit page
 ```
 
 ### How time enters the model
@@ -165,9 +168,47 @@ python -m training.evaluate_temporal_hetero --no-time
 Serving:
 
 ```bash
-uvicorn backend.main:app --reload            # http://127.0.0.1:8000/docs
+uvicorn backend.main:app --reload
+```
+
+| URL | What it is |
+|---|---|
+| `http://127.0.0.1:8000/dashboard` | Web console — the main interface |
+| `http://127.0.0.1:8000/docs` | Interactive OpenAPI docs |
+
+And the Streamlit page, which stays as a quick analyst view:
+
+```bash
 streamlit run dashboard/app.py               # http://localhost:8501
 ```
+
+---
+
+## Web console
+
+`/dashboard` is a single-page console served by the API itself. It has no
+build step and no external dependencies — the charts and the ring graph are
+hand-rolled SVG, so it works offline and there is nothing to `npm install`.
+
+- **Overview** — headline counters, ring-detection quality, event mix and the
+  injected fraud typologies.
+- **Fraud rings** — every detected ring, with a drill-down showing the money
+  flow as a directed graph, the member accounts coloured by risk, matched
+  ground-truth rings, and the event timeline for the window.
+- **Accounts** — the score distribution with the decision threshold marked,
+  filter and search over all 500 accounts, and a single-account lookup.
+- **Live scoring** — post a transaction and see the decision, the score for
+  each endpoint, the rule-layer contribution and the reasons behind it.
+  Two preset buttons demonstrate a known ring pair and unseen accounts.
+- **Model** — the measured test metrics as a grouped bar chart, a confusion
+  matrix per model, and the caveat about the small test split.
+
+Dark and light themes, keyed to a toggle and remembered in `localStorage`.
+The layout collapses to an icon rail on narrow screens.
+
+Everything on the page is read from the API at load time. The number of
+accounts, rings and every metric come from `/api/overview`, `/api/metrics`
+and `/api/rings` — none of it is hard-coded in the frontend.
 
 Everything is seeded (`SEED = 42`) and CPU-only. Two runs of the simulator
 produce byte-identical CSVs.
@@ -188,6 +229,18 @@ produce byte-identical CSVs.
 | GET | `/accounts/{account_id}/risk` | Model score for one account |
 | GET | `/model/info` | Which model is loaded, and its threshold |
 | POST | `/score` | Score a transaction |
+| GET | `/dashboard` | Web console |
+
+Backing the console (additive; the endpoints above kept their contracts):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/overview` | Headline counters and event mix |
+| GET | `/api/metrics` | Measured metrics for all three models |
+| GET | `/api/rings` | Detected rings |
+| GET | `/api/rings/{ring_id}` | One ring with members, edges and timeline |
+| GET | `/api/accounts` | Paged, filterable, searchable account list |
+| GET | `/api/accounts-summary` | Score histogram and risk-level counts |
 
 `POST /score` returns the model's view of both endpoints plus the rule-layer
 contribution, so a decision can be audited:
@@ -223,8 +276,9 @@ reports `rule_layer_model_unavailable`.
 ## Layout
 
 ```
-backend/          FastAPI service and the model serving layer
-dashboard/        Streamlit dashboard
+backend/          FastAPI service, model serving layer, console API
+frontend/         Web console (index.html, styles.css, app.js)
+dashboard/        Streamlit page
 data/synthetic/   Generated event stream
 data/processed/   Graphs, labels, risk scores, detected rings
 detection/        Rule-based and GNN-driven ring detection, explainer
@@ -233,7 +287,7 @@ models/           Model definitions
 models/artifacts/ Trained checkpoints and measured metrics
 simulator/        Synthetic UPI event generator
 training/         Training and evaluation scripts
-tests/            45 tests
+tests/            61 tests
 ```
 
 ### Superseded files

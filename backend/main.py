@@ -6,8 +6,11 @@ from typing import Optional, Any
 import math
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.dashboard_api import router as dashboard_router
 from backend.model_service import model_service
 
 
@@ -22,6 +25,8 @@ GNN_RINGS_FILE = BASE_DIR / "data" / "processed" / "gnn_detected_rings.csv"
 EXPLANATIONS_FILE = BASE_DIR / "data" / "processed" / "ring_explanations.csv"
 EVENTS_FILE = BASE_DIR / "data" / "synthetic" / "upi_events.csv"
 SCORES_FILE = BASE_DIR / "data" / "processed" / "account_risk_scores.csv"
+
+FRONTEND_DIR = BASE_DIR / "frontend"
 
 
 # ============================================================
@@ -67,6 +72,28 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+app.include_router(dashboard_router)
+
+
+# ============================================================
+# WEB CONSOLE
+#
+# Static single-page console served from frontend/. Mounted only when
+# the directory exists so the API still starts without it.
+# ============================================================
+
+if FRONTEND_DIR.is_dir():
+
+    app.mount(
+        "/static",
+        StaticFiles(directory=FRONTEND_DIR),
+        name="static",
+    )
+
+    @app.get("/dashboard", include_in_schema=False)
+    def dashboard():
+        return FileResponse(FRONTEND_DIR / "index.html")
 
 
 # ============================================================
@@ -199,6 +226,7 @@ def root():
             "score": "/score",
             "account_risk": "/accounts/{account_id}/risk",
             "model_info": "/model/info",
+            "dashboard": "/dashboard",
             "docs": "/docs",
         },
     }
@@ -524,6 +552,11 @@ def score_transaction(transaction: Transaction):
             if model_service.available
             else "rule_layer_model_unavailable"
         )
+
+    # Band the rounded value, not the raw float. 0.35 + 0.05 is
+    # 0.39999999999999997 in binary floating point, which would report
+    # LOW next to a displayed risk_score of 0.4000.
+    score = round(score, 4)
 
     if score >= 0.70:
         risk_level = "HIGH"

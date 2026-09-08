@@ -24,9 +24,9 @@
         "uvicorn",
         "backend.main:app",
         "--port",
-        "8000"
+        "8010"
       ],
-      "port": 8000
+      "port": 8010
     }
   ]
 }
