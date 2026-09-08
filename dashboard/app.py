@@ -263,8 +263,20 @@ else:
 
         st.write("Risk level distribution")
 
+        # Passed as an explicit two-column frame with named x and y. Handing
+        # st.bar_chart a bare value_counts Series rendered an empty chart with
+        # a nonsensical axis range.
+        distribution = (
+            scores["risk_level"]
+            .value_counts()
+            .rename_axis("risk_level")
+            .reset_index(name="accounts")
+        )
+
         st.bar_chart(
-            scores["risk_level"].value_counts(),
+            distribution,
+            x="risk_level",
+            y="accounts",
         )
 
     with right:
@@ -314,7 +326,18 @@ with right:
 
     if not events.empty and "event_type" in events.columns:
 
-        st.bar_chart(events["event_type"].value_counts())
+        event_counts = (
+            events["event_type"]
+            .value_counts()
+            .rename_axis("event_type")
+            .reset_index(name="events")
+        )
+
+        st.bar_chart(
+            event_counts,
+            x="event_type",
+            y="events",
+        )
 
         if "typology" in events.columns:
 
