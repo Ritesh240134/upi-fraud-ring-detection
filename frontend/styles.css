@@ -34,10 +34,14 @@
 
   --sidebar-w:     248px;
 
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-          "Liberation Mono", monospace;
+  /* Segoe UI leads the stack: this console is used on Windows, where it
+     is the native UI face and renders with the best hinting. */
+  --font: "Segoe UI Variable Text", "Segoe UI", -apple-system,
+          BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --display: "Segoe UI Variable Display", "Segoe UI", -apple-system,
+             BlinkMacSystemFont, Roboto, Arial, sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, SFMono-Regular,
+          "SF Mono", Menlo, "Liberation Mono", monospace;
 
   color-scheme: dark;
 }
@@ -81,9 +85,64 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
+/* A faint wash behind the app so a full-screen dark UI does not read as
+   flat black on a large monitor. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(900px 500px at 78% -8%,
+                    rgba(91, 141, 239, .10), transparent 60%),
+    radial-gradient(700px 420px at 5% 105%,
+                    rgba(2, 128, 144, .08), transparent 62%);
+}
+[data-theme="light"] body::before {
+  background:
+    radial-gradient(900px 500px at 78% -8%,
+                    rgba(91, 141, 239, .07), transparent 60%),
+    radial-gradient(700px 420px at 5% 105%,
+                    rgba(2, 128, 144, .05), transparent 62%);
+}
+.shell { position: relative; z-index: 1; }
+
+h1, h2, h3 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+/* ---------- Windows scrollbars ----------
+   The platform default is a wide light-grey bar that cuts through a dark
+   console. These rules make it match the surface it scrolls. */
+
+* { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-clip: border-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+::selection { background: var(--accent-soft); color: var(--text); }
+
+/* Keyboard focus stays visible everywhere. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 
 .num, .mono { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 
@@ -154,8 +213,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
 }
 .nav-item:hover { background: var(--surface-2); color: var(--text); }
 .nav-item.is-active {
-  background: var(--accent-soft);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    var(--accent-soft) 55%,
+    transparent
+  );
   color: var(--text);
+  font-weight: 600;
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .nav-item.is-active .ico { fill: var(--accent); }
@@ -204,8 +269,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
   z-index: 20;
 }
 
-.topbar h1 { font-size: 19px; }
-.topbar p  { margin: 2px 0 0; font-size: 12.5px; color: var(--text-dim); }
+.topbar h1 { font-size: 21px; letter-spacing: -.02em; }
+.topbar p  { margin: 3px 0 0; font-size: 12.5px; color: var(--text-dim); }
 
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 
@@ -290,13 +355,18 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
 /* ---------- cards ---------- */
 
 .card {
-  background: var(--surface);
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface) 100%, white 2.5%) 0%,
+      var(--surface) 70px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px;
   box-shadow: var(--shadow);
   margin-bottom: 16px;
+  transition: border-color .16s ease;
 }
+.card:hover { border-color: color-mix(in srgb, var(--border) 55%, var(--accent-line)); }
 .card-flush { padding: 0; }
 .card-flush .card-head { padding: 16px 18px; border-bottom: 1px solid var(--border-soft); }
 
@@ -326,46 +396,94 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
 
 /* ---------- kpi ---------- */
 
+/* Fixed column counts rather than auto-fit. auto-fit packed five cards on
+   a 1366px screen and orphaned the sixth on a row of its own. */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
+@media (min-width: 1500px) { .kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@media (max-width: 780px)  { .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 440px)  { .kpi-grid { grid-template-columns: 1fr; } }
 
 .kpi {
-  background: var(--surface);
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface) 100%, white 3%) 0%,
+      var(--surface) 62%);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 15px 16px;
+  padding: 14px 16px 15px;
   box-shadow: var(--shadow);
   position: relative;
   overflow: hidden;
+  transition: transform .16s ease, border-color .16s ease,
+              box-shadow .16s ease;
 }
+.kpi:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-line);
+}
+
+/* A soft glow in the corner carries the card's status colour without a
+   stripe down the edge. It has to fade out - a flat circle reads as a
+   rendering artefact rather than as intent. */
 .kpi::after {
   content: "";
-  position: absolute; inset: 0 auto 0 0;
-  width: 3px; background: var(--accent); opacity: .8;
+  position: absolute;
+  top: -70px; right: -70px;
+  width: 170px; height: 170px;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--kpi-tint, var(--accent)) 55%, transparent),
+    transparent 72%
+  );
+  opacity: .5;
+  pointer-events: none;
 }
-.kpi.is-danger::after  { background: var(--danger); }
-.kpi.is-success::after { background: var(--success); }
-.kpi.is-warn::after    { background: var(--warn); }
+.kpi.is-danger  { --kpi-tint: var(--danger); }
+.kpi.is-success { --kpi-tint: var(--success); }
+.kpi.is-warn    { --kpi-tint: var(--warn); }
+
+.kpi-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+.kpi-head .ico { width: 14px; height: 14px; fill: var(--text-faint); }
+.kpi.is-danger  .kpi-head .ico { fill: var(--danger); }
+.kpi.is-success .kpi-head .ico { fill: var(--success); }
+.kpi.is-warn    .kpi-head .ico { fill: var(--warn); }
 
 .kpi-label {
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: .03em;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .05em;
   text-transform: uppercase;
   color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kpi-value {
-  font-size: 27px;
-  font-weight: 650;
-  letter-spacing: -.02em;
-  margin-top: 5px;
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 680;
+  letter-spacing: -.03em;
+  line-height: 1.12;
+  margin-top: 4px;
   font-variant-numeric: tabular-nums;
 }
-.kpi-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.kpi-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  line-height: 1.35;
+}
 
 /* ---------- bars ---------- */
 
@@ -416,10 +534,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
   white-space: nowrap;
 }
 .table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr { transition: background .12s; }
+.table tbody tr:hover { background: var(--surface-2); }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
-.table-click tbody tr { cursor: pointer; transition: background .12s; }
-.table-click tbody tr:hover { background: var(--surface-2); }
-.table-click tbody tr.is-selected { background: var(--accent-soft); }
+.table-click tbody tr { cursor: pointer; }
+.table-click tbody tr.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 
 .table-foot {
   display: flex; align-items: center; justify-content: space-between;

@@ -1,0 +1,62 @@
+Run my existing project "upi-fraud-ring-detection" in this workspace.
+
+CONTEXT
+- Windows, Python 3.11, CPU-only. A virtual environment already exists at
+  .venv - use it, do not create a new one and do not reinstall packages.
+- The project is already trained. models/artifacts/ holds the checkpoints and
+  data/processed/ holds the graphs, scores and detected rings.
+- Do NOT retrain unless a required artifact is missing.
+- Do NOT modify any code. This is a run-and-verify task only.
+
+CRITICAL RULE
+Always invoke scripts as modules from the project root:
+    .venv\Scripts\python.exe -m graph.prepare_hetero_graph
+Never as a file path (python graph/prepare_hetero_graph.py) - the modules
+import each other as a package and a direct path run fails with
+"ModuleNotFoundError: No module named 'graph'".
+
+STEPS
+1. Confirm the environment:
+   .venv\Scripts\python.exe -c "import torch, torch_geometric, fastapi; print(torch.__version__)"
+
+2. Start the API (it also serves the web console):
+   .venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
+   If port 8000 is already in use, report which process holds it and use
+   --port 8010 instead. Do not kill a process you did not start.
+
+3. Verify these endpoints return HTTP 200:
+   /health
+   /model/info            -> must report the model as available
+   /api/overview
+   /api/stream/state      -> must report available: true
+   /dashboard             -> the web console
+
+4. Run the test suite and report the result:
+   .venv\Scripts\python.exe -m pytest tests/ -q
+   Expected: 72 passed.
+
+5. Demonstrate live streaming detection:
+   .venv\Scripts\python.exe -m streaming.replay --reset --tail 300 --speed 5000
+   Expected: rings grow from 0 to 12 as the fraud burst arrives, ending with
+   12 active rings and 72 flagged accounts - the same answer the batch
+   pipeline produces.
+
+OPTIONAL - only if artifacts are missing or I ask for a full rebuild
+   .venv\Scripts\python.exe -m simulator.upi_simulator
+   .venv\Scripts\python.exe -m graph.create_labels
+   .venv\Scripts\python.exe -m graph.prepare_graph
+   .venv\Scripts\python.exe -m graph.prepare_hetero_graph
+   .venv\Scripts\python.exe -m training.train_gnn
+   .venv\Scripts\python.exe -m training.evaluate_gnn
+   .venv\Scripts\python.exe -m training.train_temporal_hetero
+   .venv\Scripts\python.exe -m training.evaluate_temporal_hetero
+   .venv\Scripts\python.exe -m detection.ring_detector
+   .venv\Scripts\python.exe -m detection.explainer
+   .venv\Scripts\python.exe -m detection.gnn_ring_detector
+   Takes about six minutes.
+
+REPORTING
+- Show the exact commands used.
+- State clearly whether each step succeeded or failed.
+- Report the real measured numbers. Do not invent or round-up any metric.
+- If something fails, show the actual error output rather than summarising it.

@@ -145,6 +145,23 @@ function showView(name) {
 // OVERVIEW
 // ==========================================================
 
+// Small inline glyphs, so the cards read at a glance without a icon font.
+const ICONS = {
+  user: "M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5c0-3-4-5.5-9-5.5Z",
+  pulse: "M3 12h3.5l2-6 4 13 2.5-7H21",
+  ring: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14Zm0 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
+  target: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z",
+  alert: "M12 2 1 21h22L12 2Zm0 6 6.9 12H5.1L12 8Zm-1 3v4h2v-4h-2Zm0 5v2h2v-2h-2Z",
+  chart: "M4 19h16v2H4v-2Zm2-4h3v3H6v-3Zm5-6h3v9h-3V9Zm5-6h3v15h-3V3Z",
+};
+
+function icon(name) {
+  const stroked = name === "pulse";
+  return `<svg viewBox="0 0 24 24" class="ico"${
+    stroked ? ' style="fill:none;stroke:currentColor;stroke-width:2"' : ""
+  }><path d="${ICONS[name]}"/></svg>`;
+}
+
 function renderKpis(data) {
   const cards = [
     {
@@ -152,42 +169,51 @@ function renderKpis(data) {
       value: fmtInt(data.accounts),
       sub: `${fmtInt(data.fraud_accounts)} fraudulent`,
       tone: "",
+      icon: "user",
     },
     {
       label: "Events",
       value: fmtInt(data.events),
       sub: `${fmtInt(data.fraud_events)} fraud-flagged`,
       tone: "",
+      icon: "pulse",
     },
     {
       label: "Rings detected",
       value: fmtInt(data.rings_detected),
       sub: `${fmtInt(data.accounts_in_rings)} accounts implicated`,
       tone: "is-danger",
+      icon: "ring",
     },
     {
       label: "Ring precision",
       value: data.ring_precision === null ? "–" : fmtPct(data.ring_precision),
       sub: `${fmtInt(data.true_fraud_in_rings)} of ${fmtInt(data.accounts_in_rings)} truly fraudulent`,
       tone: "is-success",
+      icon: "target",
     },
     {
       label: "High-risk accounts",
       value: fmtInt(data.high_risk_accounts),
       sub: "scored above 0.60",
       tone: "is-warn",
+      icon: "alert",
     },
     {
       label: "Test ROC-AUC",
       value: fmtNum(data.test_roc_auc),
       sub: `F1 ${fmtNum(data.test_f1)} on held-out split`,
       tone: "",
+      icon: "chart",
     },
   ];
 
   $("#kpiGrid").innerHTML = cards.map(card => `
     <div class="kpi ${card.tone}">
-      <div class="kpi-label">${esc(card.label)}</div>
+      <div class="kpi-head">
+        ${icon(card.icon)}
+        <span class="kpi-label">${esc(card.label)}</span>
+      </div>
       <div class="kpi-value">${esc(card.value)}</div>
       <div class="kpi-sub">${esc(card.sub)}</div>
     </div>`).join("");
@@ -1063,18 +1089,21 @@ function renderLive(state) {
       value: fmtInt(state.events_total),
       sub: `${fmtInt(state.events_ingested)} ingested live`,
       tone: "",
+      icon: "pulse",
     },
     {
       label: "Accounts tracked",
       value: fmtInt(state.accounts_known),
       sub: `${fmtInt(state.flagged_accounts)} above threshold`,
       tone: "",
+      icon: "user",
     },
     {
       label: "Live rings",
       value: fmtInt(state.active_rings),
       sub: `${state.window_minutes} minute window`,
       tone: "is-danger",
+      icon: "ring",
     },
     {
       label: "Rescore latency",
@@ -1082,6 +1111,7 @@ function renderLive(state) {
         state.last_rescore_ms === null ? "–" : `${state.last_rescore_ms} ms`,
       sub: `${fmtInt(state.rescores)} rescores, every ${state.rescore_every} events`,
       tone: "is-success",
+      icon: "target",
     },
     {
       label: "Throughput",
@@ -1090,12 +1120,16 @@ function renderLive(state) {
         ? `${fmtInt(state.events_rejected)} rejected`
         : "no rejected events",
       tone: state.events_rejected ? "is-warn" : "",
+      icon: state.events_rejected ? "alert" : "chart",
     },
   ];
 
   $("#liveKpis").innerHTML = cards.map(card => `
     <div class="kpi ${card.tone}">
-      <div class="kpi-label">${esc(card.label)}</div>
+      <div class="kpi-head">
+        ${icon(card.icon)}
+        <span class="kpi-label">${esc(card.label)}</span>
+      </div>
       <div class="kpi-value">${esc(card.value)}</div>
       <div class="kpi-sub">${esc(card.sub)}</div>
     </div>`).join("");
